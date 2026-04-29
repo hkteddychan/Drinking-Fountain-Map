@@ -1,0 +1,62 @@
+name: Update Drinking Fountain Data
+
+on:
+  schedule:
+    # Every day at 08:00 Hong Kong Time (00:00 UTC)
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Fetch latest data from CSDI
+        run: |
+          DATASET_ID="epd_rcd_1638154342238_45289"
+          API="https://portal.csdi.gov.hk/server/rest/services/common/${DATASET_ID}/FeatureServer/0/query"
+
+          curl -s "$API?where=1%3D1&outFields=*&f=json&outSR=4326" \
+            -H "User-Agent: Mozilla/5.0" \
+            -o raw_data.json
+
+          echo "Fetched raw data"
+
+      - name: Convert to GeoJSON
+        run: |
+          node -e "
+          const fs = require('fs');
+          const data = JSON.parse(fs.readFileSync('raw_data.json', 'utf8'));
+          const features = data.features.map(f => ({
+            type: 'Feature',
+            geometry: {
+              type: 'Point',
+              coordinates: [f.attributes.LONGITUDE, f.attributes.LATITUDE]
+            },
+            properties: {
+              name_tc: f.attributes.NAME_TC,
+              name_en: f.attributes.NAME_EN,
+              address_tc: f.attributes.ADDRESS_TC,
+              address_en: f.attributes.ADDRESS_EN,
+              district_tc: f.attributes.SEARCH01_TC,
+              district_en: f.attributes.SEARCH01_EN,
+              type: f.attributes.SEARCH02_TC,
+              last_update: new Date(f.attributes.LASTUPDATE).toISOString()
+            }
+          }));
+          const geojson = { type: 'FeatureCollection', features };
+          fs.writeFileSync('data.json', JSON.stringify(geojson, null, 0));
+          console.log('Converted', features.length, 'features');
+          "
+
+      - name: Commit if changed
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: 'chore: daily update drinking fountain data'
+          file_pattern: data.json raw_data.json
+          skip_dirty: false
