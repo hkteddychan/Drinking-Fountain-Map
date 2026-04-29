@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>香港飲水機地圖 | Drinking Fountain Map</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Microsoft JhengHei", sans-serif; }
+  #map { width: 100vw; height: 100vh; }
+
+  .controls {
+    position: absolute; top: 10px; left: 10px; z-index: 1000;
+    display: flex; flex-direction: column; gap: 8px; max-width: 340px;
+  }
+
+  .header-card {
+    background: white; border-radius: 12px; padding: 14px 16px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+  }
+  .header-card h1 {
+    font-size: 18px; font-weight: 700; color: #1a73e8;
+    margin-bottom: 4px;
+  }
+  .header-card p {
+    font-size: 12px; color: #666;
+  }
+  .stats {
+    display: flex; gap: 12px; margin-top: 8px;
+  }
+  .stat {
+    display: flex; align-items: center; gap: 4px; font-size: 13px;
+  }
+  .stat-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+  }
+
+  .filter-card {
+    background: white; border-radius: 12px; padding: 12px 14px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+  }
+  .filter-card label {
+    font-size: 12px; font-weight: 600; color: #333; display: block; margin-bottom: 6px;
+  }
+  .filter-card select {
+    width: 100%; padding: 7px 10px; border: 1px solid #ddd;
+    border-radius: 8px; font-size: 14px; background: white;
+    font-family: inherit;
+  }
+
+  .legend {
+    background: white; border-radius: 12px; padding: 12px 14px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.15); font-size: 12px;
+  }
+  .legend h3 { font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+  .legend-item { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
+  .legend-dot { width: 12px; height: 12px; border-radius: 50%; }
+
+  .update-info {
+    background: white; border-radius: 12px; padding: 10px 14px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.15); font-size: 11px; color: #888;
+  }
+
+  .leaflet-popup-content-wrapper { border-radius: 10px; }
+  .popup-name { font-size: 15px; font-weight: 700; margin-bottom: 4px; }
+  .popup-addr { font-size: 13px; color: #555; margin-bottom: 4px; }
+  .popup-type {
+    display: inline-block; padding: 2px 8px; border-radius: 12px;
+    font-size: 12px; font-weight: 600;
+  }
+  .popup-type.indoor { background: #e3f2fd; color: #1565c0; }
+  .popup-type.outdoor { background: #e8f5e9; color: #2e7d32; }
+  .popup-type.both { background: #fff3e0; color: #e65100; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<div class="controls">
+  <div class="header-card">
+    <h1>🚰 香港飲水機地圖</h1>
+    <p>Drinking Fountain Map — EPD 環境保護署</p>
+    <div class="stats">
+      <div class="stat"><div class="stat-dot" style="background:#1565c0"></div><span id="stat-indoor">—</span> 室內</div>
+      <div class="stat"><div class="stat-dot" style="background:#2e7d32"></div><span id="stat-outdoor">—</span> 室外</div>
+      <div class="stat"><div class="stat-dot" style="background:#e65100"></div><span id="stat-both">—</span> 室內外</div>
+    </div>
+  </div>
+
+  <div class="filter-card">
+    <label>按區域篩選 | Filter by District</label>
+    <select id="district-filter">
+      <option value="all">全部區域 All Districts</option>
+    </select>
+  </div>
+
+  <div class="legend">
+    <h3>圖例 Legend</h3>
+    <div class="legend-item"><div class="legend-dot" style="background:#1565c0"></div>室內 Indoor</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#2e7d32"></div>室外 Outdoor</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#e65100"></div>室內及室外 Both</div>
+  </div>
+
+  <div class="update-info" id="update-info">載入中…</div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ── Config ──────────────────────────────────────────────
+const DATA_URL = './data.json';
+const HK_CENTER = [22.3193, 114.1694];
+const DEFAULT_ZOOM = 11;
+
+// ── Colors ──────────────────────────────────────────────
+const COLOR = { indoor: '#1565c0', outdoor: '#2e7d32', both: '#e65100' };
+
+// ── Map ─────────────────────────────────────────────────
+const map = L.map('map', { zoomControl: true }).setView(HK_CENTER, DEFAULT_ZOOM);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© OpenStreetMap contributors',
+  maxZoom: 19
+}).addTo(map);
+
+let allFeatures = [];
+let markers = [];
+let currentFilter = 'all';
+
+// ── Load data ────────────────────────────────────────────
+async function loadData() {
+  const resp = await fetch(DATA_URL);
+  const geojson = await resp.json();
+  allFeatures = geojson.features;
+
+  // Stats
+  const counts = { indoor: 0, outdoor: 0, both: 0 };
+  allFeatures.forEach(f => {
+    const t = f.properties.type;
+    if (t === '室內') counts.indoor++;
+    else if (t === '室外') counts.outdoor++;
+    else counts.both++;
+  });
+  document.getElementById('stat-indoor').textContent = counts.indoor;
+  document.getElementById('stat-outdoor').textContent = counts.outdoor;
+  document.getElementById('stat-both').textContent = counts.both;
+
+  // District filter
+  const districts = [...new Set(allFeatures.map(f => f.properties.district_tc))].sort();
+  const sel = document.getElementById('district-filter');
+  districts.forEach(d => {
+    const opt = document.createElement('option');
+    opt.value = d; opt.textContent = d;
+    sel.appendChild(opt);
+  });
+
+  // Update info
+  const latest = allFeatures.reduce((max, f) =>
+    f.properties.last_update > max ? f.properties.last_update : max, '');
+  const date = new Date(latest);
+  document.getElementById('update-info').textContent =
+    `數據更新 | ${date.toLocaleDateString('zh-Hant')} (共 ${allFeatures.length} 個飲水機)`;
+
+  renderMarkers();
+}
+
+function typeKey(type) {
+  if (type === '室內') return 'indoor';
+  if (type === '室外') return 'outdoor';
+  return 'both';
+}
+
+function renderMarkers() {
+  // Remove existing
+  markers.forEach(m => map.removeLayer(m));
+  markers = [];
+
+  const filtered = currentFilter === 'all'
+    ? allFeatures
+    : allFeatures.filter(f => f.properties.district_tc === currentFilter);
+
+  filtered.forEach(feature => {
+    const p = feature.properties;
+    const color = COLOR[typeKey(p.type)];
+    const isIndoor = p.type === '室內';
+    const isOutdoor = p.type === '室外';
+
+    const marker = L.circleMarker(
+      [feature.geometry.coordinates[1], feature.geometry.coordinates[0]],
+      {
+        radius: 8,
+        fillColor: color,
+        color: '#fff',
+        weight: 2,
+        fillOpacity: 0.85
+      }
+    );
+
+    const typeClass = typeKey(p.type);
+    const popupHtml = `
+      <div class="popup-name">${p.name_tc}</div>
+      <div class="popup-name" style="font-size:12px;font-weight:400;color:#888">${p.name_en}</div>
+      <div class="popup-addr">${p.address_tc}</div>
+      <div class="popup-addr" style="font-size:11px">${p.address_en}</div>
+      <div style="margin-top:6px">
+        <span class="popup-type ${typeClass}">${p.type || '未分類'}</span>
+        <span style="font-size:11px;color:#888;margin-left:6px">${p.district_tc}</span>
+      </div>
+    `;
+    marker.bindPopup(popupHtml, { maxWidth: 280 });
+    marker.addTo(map);
+    markers.push(marker);
+  });
+}
+
+// ── Filter ───────────────────────────────────────────────
+document.getElementById('district-filter').addEventListener('change', e => {
+  currentFilter = e.target.value;
+  renderMarkers();
+});
+
+loadData();
+</script>
+</body>
+</html>
