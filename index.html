@@ -73,11 +73,23 @@
   .popup-type.outdoor { background: #e8f5e9; color: #2e7d32; }
   .popup-type.both { background: #fff3e0; color: #e65100; }
 </style>
+
+  <meta name="theme-color" content="#1565c0">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/svg+xml" href="assets/icon.svg">
+  <link rel="apple-touch-icon" href="assets/icon-192.png">
+  <link rel="stylesheet" href="assets/hkmap.css">
+  <style>
+[data-theme="dark"] .popup-name, [data-theme="dark"] .popup-addr { color: var(--hk-text); }
+[data-theme="dark"] .leaflet-control-attribution { background: rgba(0,0,0,.6); color: #ccc; }
+
+</style>
+  <script src="assets/hkmap.js"></script>
 </head>
 <body>
 <div id="map"></div>
 
-<div class="controls">
+<div class="controls hk-controls-collapse">
   <div class="header-card">
     <h1>🚰 香港飲水機地圖</h1>
     <p>Drinking Fountain Map — EPD 環境保護署</p>
@@ -128,7 +140,14 @@ let currentFilter = 'all';
 
 // ── Load data ────────────────────────────────────────────
 async function loadData() {
-  const resp = await fetch(DATA_URL);
+  let resp;
+  try {
+    resp = await fetch(DATA_URL);
+  } catch (e) {
+    document.getElementById('update-info').textContent = '載入失敗，請檢查網絡';
+    if (window.HKMap) HKMap.showError('⚠️ 飲水機數據載入失敗', loadData);
+    return;
+  }
   const geojson = await resp.json();
   allFeatures = geojson.features;
 
@@ -219,6 +238,11 @@ document.getElementById('district-filter').addEventListener('change', e => {
 });
 
 loadData();
+</script>
+
+<script>
+  window.HKMap && window.HKMap.registerSW && window.HKMap.registerSW('sw.js');
+  window.HKMap && window.HKMap.mountThemeButton && window.HKMap.mountThemeButton(document.getElementById('map'));
 </script>
 </body>
 </html>
