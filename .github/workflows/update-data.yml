@@ -60,3 +60,5 @@ jobs:
           commit_message: 'chore: daily update drinking fountain data'
           file_pattern: data.json raw_data.json
           skip_dirty: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
