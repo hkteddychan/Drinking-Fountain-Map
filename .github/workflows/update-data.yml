@@ -2,7 +2,7 @@ name: Update Drinking Fountain Data
 
 on:
   schedule:
-    - cron: '*/30 * * * *'
+    - cron: '0 */6 * * *'
   workflow_dispatch:
 
 jobs:
@@ -38,17 +38,17 @@ jobs:
             type: 'Feature',
             geometry: {
               type: 'Point',
-              coordinates: [f.attributes.LONGITUDE, f.attributes.LATITUDE]
+              coordinates: [f.attributes.Longitude, f.attributes.Latitude]
             },
             properties: {
-              name_tc: f.attributes.NAME_TC,
-              name_en: f.attributes.NAME_EN,
-              address_tc: f.attributes.ADDRESS_TC,
-              address_en: f.attributes.ADDRESS_EN,
-              district_tc: f.attributes.SEARCH01_TC,
-              district_en: f.attributes.SEARCH01_EN,
-              type: f.attributes.SEARCH02_TC,
-              last_update: new Date(f.attributes.LASTUPDATE).toISOString()
+              name_tc: f.attributes.NameTC,
+              name_en: f.attributes.NameEN,
+              address_tc: f.attributes.AddressTC,
+              address_en: f.attributes.AddressEN,
+              district_tc: f.attributes.DistrictTC,
+              district_en: f.attributes.DistrictEN,
+              type: f.attributes.VenueTypeTC,
+              last_update: f.attributes.LastUpdate ? new Date(f.attributes.LastUpdate).toISOString() : null
             }
           }));
           const geojson = { type: 'FeatureCollection', features };
