@@ -39,12 +39,18 @@
   .filter-card {
     background: white; border-radius: 12px; padding: 12px 14px;
     box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+    display: flex; flex-direction: column; gap: 8px;
   }
-  .filter-card label {
-    font-size: 12px; font-weight: 600; color: #333; display: block; margin-bottom: 6px;
+  .filter-card label, .filter-card .filter-label {
+    font-size: 12px; font-weight: 600; color: #333; display: block; margin-bottom: 0;
   }
   .filter-card select {
     width: 100%; padding: 7px 10px; border: 1px solid #ddd;
+    border-radius: 8px; font-size: 14px; background: white;
+    font-family: inherit;
+  }
+  #search-input {
+    width: 100%; padding: 8px 10px; border: 1px solid #ddd;
     border-radius: 8px; font-size: 14px; background: white;
     font-family: inherit;
   }
@@ -80,9 +86,7 @@
   <link rel="apple-touch-icon" href="assets/icon-192.png">
   <link rel="stylesheet" href="assets/hkmap.css">
   <style>
-[data-theme="dark"] .popup-name, [data-theme="dark"] .popup-addr { color: var(--hk-text); }
 [data-theme="dark"] .leaflet-control-attribution { background: rgba(0,0,0,.6); color: #ccc; }
-
 </style>
   <script src="assets/hkmap.js"></script>
 </head>
@@ -101,10 +105,27 @@
   </div>
 
   <div class="filter-card">
-    <label>按區域篩選 | Filter by District</label>
+    <label for="search-input">搜尋飲水機 | Search fountains</label>
+    <input id="search-input" type="search" autocomplete="off"
+           placeholder="搜尋名稱、地址或區域… | Name, address or district">
+
+    <label for="district-filter">按區域篩選 | Filter by District</label>
     <select id="district-filter">
       <option value="all">全部區域 All Districts</option>
     </select>
+
+    <span class="filter-label" id="type-filter-label">按類型篩選 | Filter by Type</span>
+    <div class="type-toggle" id="type-filter" role="group" aria-labelledby="type-filter-label">
+      <button type="button" class="type-pill active" data-type="all" aria-pressed="true">全部 All</button>
+      <button type="button" class="type-pill" data-type="outdoor" aria-pressed="false">室外 Outdoor</button>
+      <button type="button" class="type-pill" data-type="indoor" aria-pressed="false">室內 Indoor</button>
+      <button type="button" class="type-pill" data-type="both" aria-pressed="false">室內外 Both</button>
+    </div>
+
+    <div class="filter-status">
+      <span id="filter-summary" aria-live="polite">載入中… | Loading…</span>
+      <button type="button" id="clear-filters" hidden>清除篩選 Clear</button>
+    </div>
   </div>
 
   <div class="legend">
@@ -114,7 +135,7 @@
     <div class="legend-item"><div class="legend-dot" style="background:#e65100"></div>室內及室外 Both</div>
   </div>
 
-  <div class="update-info" id="update-info">載入中…</div>
+  <div class="update-info" id="update-info" role="status" aria-live="polite">載入中… | Loading…</div>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -126,6 +147,17 @@ const DEFAULT_ZOOM = 11;
 
 // ── Colors ──────────────────────────────────────────────
 const COLOR = { indoor: '#1565c0', outdoor: '#2e7d32', both: '#e65100' };
+const TYPE_LABEL = {
+  '室內': '室內 Indoor',
+  '室外': '室外 Outdoor',
+  '室內及室外': '室內外 Indoor & Outdoor'
+};
+const TYPE_FILTER_LABEL = {
+  all: '全部 All',
+  indoor: '室內 Indoor',
+  outdoor: '室外 Outdoor',
+  both: '室內外 Indoor & Outdoor'
+};
 
 // ── Map ─────────────────────────────────────────────────
 const map = L.map('map', { zoomControl: true }).setView(HK_CENTER, DEFAULT_ZOOM);
@@ -136,50 +168,17 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 
 let allFeatures = [];
 let markers = [];
-let currentFilter = 'all';
+const state = { district: 'all', type: 'all', query: '' };
+let searchTimer = null;
 
-// ── Load data ────────────────────────────────────────────
-async function loadData() {
-  let resp;
-  try {
-    resp = await fetch(DATA_URL);
-  } catch (e) {
-    document.getElementById('update-info').textContent = '載入失敗，請檢查網絡';
-    if (window.HKMap) HKMap.showError('⚠️ 飲水機數據載入失敗', loadData);
-    return;
-  }
-  const geojson = await resp.json();
-  allFeatures = geojson.features;
-
-  // Stats
-  const counts = { indoor: 0, outdoor: 0, both: 0 };
-  allFeatures.forEach(f => {
-    const t = f.properties.type;
-    if (t === '室內') counts.indoor++;
-    else if (t === '室外') counts.outdoor++;
-    else counts.both++;
-  });
-  document.getElementById('stat-indoor').textContent = counts.indoor;
-  document.getElementById('stat-outdoor').textContent = counts.outdoor;
-  document.getElementById('stat-both').textContent = counts.both;
-
-  // District filter
-  const districts = [...new Set(allFeatures.map(f => f.properties.district_tc))].sort();
-  const sel = document.getElementById('district-filter');
-  districts.forEach(d => {
-    const opt = document.createElement('option');
-    opt.value = d; opt.textContent = d;
-    sel.appendChild(opt);
-  });
-
-  // Update info
-  const latest = allFeatures.reduce((max, f) =>
-    f.properties.last_update > max ? f.properties.last_update : max, '');
-  const date = new Date(latest);
-  document.getElementById('update-info').textContent =
-    `數據更新 | ${date.toLocaleDateString('zh-Hant')} (共 ${allFeatures.length} 個飲水機)`;
-
-  renderMarkers();
+// ── Helpers ─────────────────────────────────────────────
+function escapeHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function typeKey(type) {
@@ -188,52 +187,319 @@ function typeKey(type) {
   return 'both';
 }
 
-function renderMarkers() {
-  // Remove existing
-  markers.forEach(m => map.removeLayer(m));
-  markers = [];
+function hkDateParts(date) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Hong_Kong',
+    year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(date);
+  const out = {};
+  parts.forEach(function (p) { out[p.type] = p.value; });
+  return { y: +out.year, m: +out.month, d: +out.day };
+}
 
-  const filtered = currentFilter === 'all'
-    ? allFeatures
-    : allFeatures.filter(f => f.properties.district_tc === currentFilter);
+function formatHKDate(iso, locale) {
+  const date = new Date(iso);
+  if (isNaN(date.getTime())) return '';
+  if (locale === 'en') {
+    return new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Hong_Kong',
+      year: 'numeric', month: 'long', day: 'numeric'
+    }).format(date);
+  }
+  const p = hkDateParts(date);
+  return p.y + '年' + p.m + '月' + p.d + '日';
+}
 
-  filtered.forEach(feature => {
+function daysSince(iso) {
+  const date = new Date(iso);
+  if (isNaN(date.getTime())) return 0;
+  const then = hkDateParts(date);
+  const now = hkDateParts(new Date());
+  const thenUtc = Date.UTC(then.y, then.m - 1, then.d);
+  const nowUtc = Date.UTC(now.y, now.m - 1, now.d);
+  return Math.max(0, Math.floor((nowUtc - thenUtc) / 86400000));
+}
+
+function remarksOf(p) {
+  const parts = [];
+  if (p.remarks_tc) parts.push(p.remarks_tc);
+  if (p.remarks_en && p.remarks_en !== p.remarks_tc) parts.push(p.remarks_en);
+  if (!parts.length && p.remarks) parts.push(p.remarks);
+  return parts.join(' / ');
+}
+
+function updateFilterSummary(count) {
+  const summary = document.getElementById('filter-summary');
+  const clearBtn = document.getElementById('clear-filters');
+  const total = allFeatures.length;
+  const bits = [];
+  if (state.district !== 'all') bits.push(state.district);
+  if (state.type !== 'all') bits.push(TYPE_FILTER_LABEL[state.type]);
+  if (state.query) bits.push('「' + state.query + '」');
+
+  let text = '顯示 ' + count + ' / ' + total + ' 個飲水機 · Showing ' + count + ' of ' + total;
+  if (bits.length) text += ' · ' + bits.join(' · ');
+  summary.textContent = text;
+
+  const active = state.district !== 'all' || state.type !== 'all' || !!state.query;
+  clearBtn.hidden = !active;
+}
+
+function filteredFeatures() {
+  const q = state.query.toLowerCase();
+  return allFeatures.filter(function (feature) {
     const p = feature.properties;
-    const color = COLOR[typeKey(p.type)];
-    const isIndoor = p.type === '室內';
-    const isOutdoor = p.type === '室外';
+    if (state.district !== 'all' && p.district_tc !== state.district) return false;
+    if (state.type !== 'all' && typeKey(p.type) !== state.type) return false;
+    if (!q) return true;
 
-    const marker = L.circleMarker(
-      [feature.geometry.coordinates[1], feature.geometry.coordinates[0]],
-      {
-        radius: 8,
-        fillColor: color,
-        color: '#fff',
-        weight: 2,
-        fillOpacity: 0.85
-      }
-    );
+    const haystack = [
+      p.name_tc, p.name_en,
+      p.address_tc, p.address_en,
+      p.district_tc, p.district_en
+    ].join(' ').toLowerCase();
 
-    const typeClass = typeKey(p.type);
-    const popupHtml = `
-      <div class="popup-name">${p.name_tc}</div>
-      <div class="popup-name" style="font-size:12px;font-weight:400;color:#888">${p.name_en}</div>
-      <div class="popup-addr">${p.address_tc}</div>
-      <div class="popup-addr" style="font-size:11px">${p.address_en}</div>
-      <div style="margin-top:6px">
-        <span class="popup-type ${typeClass}">${p.type || '未分類'}</span>
-        <span style="font-size:11px;color:#888;margin-left:6px">${p.district_tc}</span>
-      </div>
-    `;
-    marker.bindPopup(popupHtml, { maxWidth: 280 });
-    marker.addTo(map);
-    markers.push(marker);
+    return q.split(/\s+/).every(function (term) {
+      return !term || haystack.indexOf(term) !== -1;
+    });
   });
 }
 
-// ── Filter ───────────────────────────────────────────────
-document.getElementById('district-filter').addEventListener('change', e => {
-  currentFilter = e.target.value;
+// ── Load data ────────────────────────────────────────────
+async function loadData() {
+  let resp;
+  try {
+    resp = await fetch(DATA_URL, { cache: 'no-cache' });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+  } catch (e) {
+    document.getElementById('update-info').textContent =
+      '⚠️ 數據載入失敗，請檢查網絡 | Failed to load data';
+    if (window.HKMap) {
+      HKMap.showError('⚠️ 飲水機數據載入失敗 | Failed to load fountain data', loadData);
+    }
+    return;
+  }
+
+  let geojson;
+  try {
+    geojson = await resp.json();
+  } catch (e) {
+    document.getElementById('update-info').textContent =
+      '⚠️ 數據格式錯誤 | Invalid data format';
+    if (window.HKMap) {
+      HKMap.showError('⚠️ 飲水機數據格式錯誤 | Invalid fountain data', loadData);
+    }
+    return;
+  }
+
+  allFeatures = Array.isArray(geojson.features) ? geojson.features : [];
+
+  // Stats (whole dataset)
+  const counts = { indoor: 0, outdoor: 0, both: 0 };
+  allFeatures.forEach(function (f) {
+    counts[typeKey(f.properties.type)]++;
+  });
+  document.getElementById('stat-indoor').textContent = counts.indoor;
+  document.getElementById('stat-outdoor').textContent = counts.outdoor;
+  document.getElementById('stat-both').textContent = counts.both;
+
+  // District filter (bilingual options)
+  const districtMap = new Map();
+  allFeatures.forEach(function (f) {
+    const p = f.properties;
+    if (!p.district_tc) return;
+    if (!districtMap.has(p.district_tc)) districtMap.set(p.district_tc, p.district_en || '');
+  });
+
+  const sel = document.getElementById('district-filter');
+  Array.from(districtMap.keys())
+    .sort(function (a, b) { return a.localeCompare(b, 'zh-Hant'); })
+    .forEach(function (d) {
+      const en = districtMap.get(d);
+      const opt = document.createElement('option');
+      opt.value = d;
+      opt.textContent = en ? d + ' ' + en : d;
+      sel.appendChild(opt);
+    });
+
+  // Data freshness (EPD upstream date)
+  const latest = allFeatures.reduce(function (max, f) {
+    const value = f.properties.last_update || '';
+    return value > max ? value : max;
+  }, '');
+
+  const info = document.getElementById('update-info');
+  if (latest) {
+    const dateTc = formatHKDate(latest, 'tc');
+    const dateEn = formatHKDate(latest, 'en');
+    const days = daysSince(latest);
+
+    info.innerHTML = '';
+    const line = document.createElement('div');
+    line.className = 'update-line';
+    line.textContent = '資料來自 EPD｜最後更新：' + dateTc;
+    info.appendChild(line);
+
+    const sub = document.createElement('div');
+    sub.className = 'update-sub';
+    sub.textContent = 'Data source: EPD · Last updated: ' + dateEn +
+      ' · 共 ' + allFeatures.length + ' 個飲水機 / ' + allFeatures.length + ' fountains';
+    info.appendChild(sub);
+
+    if (days > 90) {
+      const warn = document.createElement('div');
+      warn.className = 'update-warn';
+      warn.textContent = '⚠️ 上游數據已 ' + days + ' 日未有更新｜Upstream data has not been updated for ' + days + ' days';
+      info.appendChild(warn);
+    }
+  } else {
+    info.textContent = '資料來自 EPD | Data source: EPD';
+  }
+
+  renderMarkers();
+}
+
+// ── Popup ────────────────────────────────────────────────
+function buildPopupHtml(p, lat, lng) {
+  const typeClass = typeKey(p.type);
+  const typeLabel = TYPE_LABEL[p.type] || (p.type || '未分類 Uncategorised');
+  const district = [p.district_tc, p.district_en].filter(Boolean).join(' · ');
+  const remarks = remarksOf(p);
+  const updated = p.last_update ? formatHKDate(p.last_update, 'tc') : '';
+  const copyAddress = [p.address_tc, p.address_en].filter(Boolean).join(' / ');
+
+  return '' +
+    '<div class="popup-name">' + escapeHtml(p.name_tc || p.name_en || '—') + '</div>' +
+    (p.name_en ? '<div class="popup-name-en">' + escapeHtml(p.name_en) + '</div>' : '') +
+    (p.address_tc ? '<div class="popup-addr">' + escapeHtml(p.address_tc) + '</div>' : '') +
+    (p.address_en ? '<div class="popup-addr-en">' + escapeHtml(p.address_en) + '</div>' : '') +
+    (remarks ? '<div class="popup-remarks"><strong>備註 Remarks：</strong>' + escapeHtml(remarks) + '</div>' : '') +
+    '<div class="popup-tags">' +
+      '<span class="popup-type ' + typeClass + '">' + escapeHtml(typeLabel) + '</span>' +
+      (district ? '<span class="popup-district">' + escapeHtml(district) + '</span>' : '') +
+    '</div>' +
+    (updated ? '<div class="popup-updated">更新日期 Last updated：' + escapeHtml(updated) + '</div>' : '') +
+    '<div class="popup-actions">' +
+      '<button type="button" class="popup-action popup-copy-btn" data-address="' +
+        escapeHtml(copyAddress) + '">📋 複製地址 Copy</button>' +
+      '<a class="popup-action" href="https://www.google.com/maps/dir/?api=1&destination=' +
+        lat + ',' + lng + '&travelmode=walking" target="_blank" rel="noopener noreferrer">🧭 Google Maps</a>' +
+      '<a class="popup-action" href="https://maps.apple.com/?daddr=' +
+        lat + ',' + lng + '&dirflg=w" target="_blank" rel="noopener noreferrer"> Apple Maps</a>' +
+    '</div>';
+}
+
+// ── Markers ──────────────────────────────────────────────
+function renderMarkers() {
+  markers.forEach(function (m) { map.removeLayer(m); });
+  markers = [];
+
+  const filtered = filteredFeatures();
+
+  filtered.forEach(function (feature) {
+    const p = feature.properties;
+    const lat = feature.geometry.coordinates[1];
+    const lng = feature.geometry.coordinates[0];
+
+    const marker = L.circleMarker([lat, lng], {
+      radius: 8,
+      fillColor: COLOR[typeKey(p.type)],
+      color: '#fff',
+      weight: 2,
+      fillOpacity: 0.85
+    });
+
+    marker.bindPopup(buildPopupHtml(p, lat, lng), { maxWidth: 300 });
+    marker.addTo(map);
+    markers.push(marker);
+  });
+
+  updateFilterSummary(filtered.length);
+}
+
+// ── Copy address ─────────────────────────────────────────
+function legacyCopy(text) {
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.top = '-1000px';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch (e) {
+    return false;
+  }
+}
+
+function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    return navigator.clipboard.writeText(text)
+      .then(function () { return true; })
+      .catch(function () { return legacyCopy(text); });
+  }
+  return Promise.resolve(legacyCopy(text));
+}
+
+document.addEventListener('click', function (e) {
+  const btn = e.target.closest('.popup-copy-btn');
+  if (!btn) return;
+  const address = btn.getAttribute('data-address') || '';
+  if (!address) {
+    if (window.HKMap) HKMap.toast('沒有地址可複製 | No address to copy');
+    return;
+  }
+  copyText(address).then(function (ok) {
+    if (window.HKMap) {
+      HKMap.toast(ok ? '✅ 已複製地址 | Address copied' : '❌ 複製失敗 | Copy failed');
+    }
+  });
+});
+
+// ── Filters ──────────────────────────────────────────────
+document.getElementById('district-filter').addEventListener('change', function (e) {
+  state.district = e.target.value;
+  renderMarkers();
+});
+
+document.getElementById('type-filter').addEventListener('click', function (e) {
+  const btn = e.target.closest('.type-pill');
+  if (!btn) return;
+  state.type = btn.getAttribute('data-type') || 'all';
+  document.querySelectorAll('#type-filter .type-pill').forEach(function (b) {
+    const active = b === btn;
+    b.classList.toggle('active', active);
+    b.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+  renderMarkers();
+});
+
+document.getElementById('search-input').addEventListener('input', function (e) {
+  const value = e.target.value.trim();
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(function () {
+    state.query = value;
+    renderMarkers();
+  }, 120);
+});
+
+document.getElementById('clear-filters').addEventListener('click', function () {
+  state.district = 'all';
+  state.type = 'all';
+  state.query = '';
+
+  document.getElementById('search-input').value = '';
+  document.getElementById('district-filter').value = 'all';
+  document.querySelectorAll('#type-filter .type-pill').forEach(function (b) {
+    const active = b.getAttribute('data-type') === 'all';
+    b.classList.toggle('active', active);
+    b.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+
   renderMarkers();
 });
 

@@ -204,3 +204,242 @@ select:focus-visible, input:focus-visible, button:focus-visible, a:focus-visible
   .hk-controls-collapse > *:not(.header-card) { display: none; }
   .hk-controls-collapse.open > *:not(.header-card) { display: flex; }
 }
+
+/* ============================================================
+   Drinking Fountain Map — page-specific enhancements
+   (search, type toggle, clear filters, freshness warning, popup)
+   ============================================================ */
+
+.controls {
+  max-height: calc(100vh - 20px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+
+.filter-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.filter-card label,
+.filter-card .filter-label {
+  color: var(--hk-text);
+}
+
+#search-input {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 14px;
+}
+
+#search-input::placeholder {
+  color: var(--hk-text-3);
+  opacity: 1;
+}
+
+#district-filter {
+  width: 100%;
+  padding: 7px 10px;
+}
+
+/* Type toggle (all / outdoor / indoor / both) */
+.type-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.type-toggle .type-pill {
+  flex: 1 1 auto;
+  min-height: 40px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.type-toggle .type-pill.active {
+  background: var(--hk-primary);
+  border-color: var(--hk-primary);
+  color: #fff;
+}
+
+[data-theme="dark"] .type-toggle .type-pill.active {
+  color: #0e1116;
+}
+
+/* Active filter summary + clear button */
+.filter-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--hk-text-3);
+}
+
+#filter-summary {
+  flex: 1 1 auto;
+}
+
+#clear-filters {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 5px 10px;
+  border: 1px solid var(--hk-border);
+  border-radius: 8px;
+  background: var(--hk-surface-2);
+  color: var(--hk-text-2);
+  font-family: var(--hk-font);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color .15s, color .15s;
+}
+
+#clear-filters:hover {
+  border-color: var(--hk-primary);
+  color: var(--hk-primary);
+}
+
+#clear-filters[hidden] {
+  display: none;
+}
+
+/* Data freshness */
+.update-info {
+  color: var(--hk-text-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.update-info .update-line {
+  color: var(--hk-text);
+  font-weight: 600;
+}
+
+.update-info .update-sub {
+  margin-top: 2px;
+  color: var(--hk-text-3);
+  font-size: 11px;
+}
+
+.update-info .update-warn {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.14);
+  color: #92500a;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+[data-theme="dark"] .update-info .update-warn {
+  border-color: rgba(251, 191, 36, 0.35);
+  background: rgba(251, 191, 36, 0.12);
+  color: #fbbf24;
+}
+
+/* Popup details */
+.popup-name {
+  color: var(--hk-text);
+}
+
+.popup-name-en {
+  margin-bottom: 4px;
+  color: var(--hk-text-2);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.popup-addr {
+  color: var(--hk-text-2);
+}
+
+.popup-addr-en {
+  color: var(--hk-text-3);
+  font-size: 11px;
+}
+
+.popup-remarks {
+  margin-top: 6px;
+  color: var(--hk-text-2);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.popup-tags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.popup-district {
+  color: var(--hk-text-3);
+  font-size: 11px;
+}
+
+.popup-updated {
+  margin-top: 6px;
+  color: var(--hk-text-3);
+  font-size: 11px;
+}
+
+.popup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid var(--hk-border);
+}
+
+.popup-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 34px;
+  padding: 6px 9px;
+  border: 1px solid var(--hk-border);
+  border-radius: 8px;
+  background: var(--hk-surface-2);
+  color: var(--hk-text-2);
+  font-family: var(--hk-font);
+  font-size: 11.5px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.popup-action:hover {
+  border-color: var(--hk-primary);
+  color: var(--hk-primary);
+}
+
+/* Mobile: full-width controls, keep cards stacked */
+@media (max-width: 640px) {
+  .controls {
+    left: 8px;
+    right: 8px;
+    max-width: none;
+    width: auto;
+  }
+
+  .hk-controls-collapse.open > *:not(.header-card) {
+    display: block;
+  }
+
+  .hk-controls-collapse.open > .filter-card {
+    display: flex;
+    flex-direction: column;
+  }
+}
